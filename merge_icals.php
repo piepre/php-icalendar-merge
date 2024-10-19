@@ -15,10 +15,21 @@ header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 define('AUTH_USER', 'yourUsername');
 define('AUTH_PASS', 'yourPassword');
 
+// Function to log failed login attempts with IP address
+function log_failed_login(): void {
+    $fileid = basename(__FILE__); 
+    $ip = $_SERVER['REMOTE_ADDR'];  // Get the IP address of the user
+    $log_message = "$fileid: Failed login attempt from IP: $ip";
+    error_log($log_message);  // Log the message to the PHP error log
+}
+
 // Function to perform Basic Authentication
-function check_auth() {
+function check_auth(): void {
     if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW']) || 
         $_SERVER['PHP_AUTH_USER'] !== AUTH_USER || $_SERVER['PHP_AUTH_PW'] !== AUTH_PASS) {
+        
+        log_failed_login();  // Log failed login attempt
+        
         header('WWW-Authenticate: Basic realm="Calendar Access"');
         header('HTTP/1.0 401 Unauthorized');
         echo 'Access denied. Incorrect username or password.';
@@ -30,18 +41,28 @@ function check_auth() {
 // Comment out / Disable if not needed
 check_auth();
 
+// Function to log iCalendar retrieval errors
+function log_calendar_error($url) {
+    $fileid = basename(__FILE__); 
+    $log_message = "$fileid: Failed to retrieve iCalendar from $url by $fileid";
+    error_log("$log_message");  // Log the message to the PHP error log
+}
+
 // Function to fetch an iCalendar via HTTPS
 function fetch_calendar($url) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Optional: in case of self-signed certificates
+    curl_setopt($ch, CURLOPT_HEADER  , true);
     $data = curl_exec($ch);
-    curl_close($ch);
+    $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     
-    if ($data === false) {
-        return null;
+    if ($httpcode != 200) {
+        log_calendar_error($url);  // Log the error if fetching fails
     }
+
+    curl_close($ch);
     
     return $data;
 }

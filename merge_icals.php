@@ -1,23 +1,22 @@
 <?php
-// HTTPS force (Secure Communication)
+// Force HTTPS for security
 if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
     die('Verbindung unsicher. HTTPS erforderlich.');
 }
 
-// Security-Header
+// Include the configuration file
+include 'config.php'; // <-- Adding this line to include config.php
+
+// Security headers
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: no-referrer');
 header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 
-// Username and password for access
-define('AUTH_USER', 'yourUsername');
-define('AUTH_PASS', 'yourPassword');
-
 // Function to log failed login attempts with IP address
 function log_failed_login(): void {
-    $fileid = basename(__FILE__); 
+    $fileid = basename(__FILE__);
     $ip = $_SERVER['REMOTE_ADDR'];  // Get the IP address of the user
     $log_message = "$fileid: Failed login attempt from IP: $ip";
     error_log($log_message);  // Log the message to the PHP error log
@@ -26,26 +25,24 @@ function log_failed_login(): void {
 // Function to perform Basic Authentication
 function check_auth(): void {
     if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW']) || 
-        $_SERVER['PHP_AUTH_USER'] !== AUTH_USER || $_SERVER['PHP_AUTH_PW'] !== AUTH_PASS) {
+        $_SERVER['PHP_AUTH_USER'] != AUTH_USER || $_SERVER['PHP_AUTH_PW'] != AUTH_PASS) {
         
         log_failed_login();  // Log failed login attempt
         
         header('WWW-Authenticate: Basic realm="Calendar Access"');
         header('HTTP/1.0 401 Unauthorized');
-        echo 'Access denied. Incorrect username or password.';
-        exit;
+        die('Access denied. Incorrect username or password.');
     }
 }
 
-// Check Basic Authentication
-// Comment out / Disable if not needed
+// Check Basic Authentication (you can disable this if not needed)
 check_auth();
 
 // Function to log iCalendar retrieval errors
 function log_calendar_error($url) {
     $fileid = basename(__FILE__); 
-    $log_message = "$fileid: Failed to retrieve iCalendar from $url by $fileid";
-    error_log("$log_message");  // Log the message to the PHP error log
+    $log_message = "$fileid: Failed to retrieve iCalendar from $url";
+    error_log($log_message);  // Log the message to the PHP error log
 }
 
 // Function to fetch an iCalendar via HTTPS
@@ -53,7 +50,7 @@ function fetch_calendar($url) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Optional: in case of self-signed certificates
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true); // Optional: in case of self-signed certificates
     curl_setopt($ch, CURLOPT_HEADER  , true);
     $data = curl_exec($ch);
     $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -135,19 +132,6 @@ function generate_ical($events, $calendar_name = null, $calendar_colour = null) 
 }
 
 // Main part of the script
-
-// Insert the URLs of the calendars to be merged here
-$calendar_urls = [
-    'https://example.com/calendar1.ics',
-    'https://example.com/calendar2.ics'
-];
-
-// Optionally set the name of the calendar
-$calendar_name = 'My Merged Calendar';
-
-// Optionally set the colour of the calendar (Hex colour in RGB, e.g. #FF0000 for Red)
-$calendar_colour = '#FF0000'; // Red
-
 // Merge the calendars
 $merged_events = merge_calendars($calendar_urls);
 

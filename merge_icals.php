@@ -9,10 +9,14 @@ include 'config.php'; // <-- Adding this line to include config.php
 
 // Security headers
 header('X-Content-Type-Options: nosniff');
-header('X-Frame-Options: DENY');
+header('X-Frame-Options: SAMEORIGIN');
 header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: no-referrer');
 header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+
+// Output the iCalendar file as a download
+header('Content-Type: text/calendar; charset=utf-8');
+header('Content-Disposition: attachment; filename="eitzen1.ics"');
 
 // Function to log failed login attempts with IP address
 function log_failed_login(): void {
@@ -24,11 +28,11 @@ function log_failed_login(): void {
 
 // Function to perform Basic Authentication
 function check_auth(): void {
-    if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW']) || 
+    if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW']) ||
         $_SERVER['PHP_AUTH_USER'] != AUTH_USER || $_SERVER['PHP_AUTH_PW'] != AUTH_PASS) {
-        
+
         log_failed_login();  // Log failed login attempt
-        
+
         header('WWW-Authenticate: Basic realm="Calendar Access"');
         header('HTTP/1.0 401 Unauthorized');
         die('Access denied. Incorrect username or password.');
@@ -36,11 +40,23 @@ function check_auth(): void {
 }
 
 // Check Basic Authentication (you can disable this if not needed)
-check_auth();
+//check_auth();
+
+// send cachefile if its enabled, exists and not older than 30 minutes
+
+if($cachefile) {
+    if(file_exists($cachefile)) {
+        if (time()-filemtime($cachefile) < 1800) {
+            $ical_content = file_get_contents($cachefile, true);
+            echo $ical_content;
+            exit;
+        }
+    }
+}
 
 // Function to log iCalendar retrieval errors
 function log_calendar_error($url) {
-    $fileid = basename(__FILE__); 
+    $fileid = basename(__FILE__);
     $log_message = "$fileid: Failed to retrieve iCalendar from $url";
     error_log($log_message);  // Log the message to the PHP error log
 }
@@ -54,14 +70,27 @@ function fetch_calendar($url) {
     curl_setopt($ch, CURLOPT_HEADER  , true);
     $data = curl_exec($ch);
     $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    
+
     if ($httpcode != 200) {
         log_calendar_error($url);  // Log the error if fetching fails
     }
 
     curl_close($ch);
-    
+
     return $data;
+}
+// Function to break lines after 75 chars with \r\n and start new line with a space
+function ical_split_line($data) {
+    if (strlen($data) > 75) {
+        $line1 = substr($data, 0, 75);
+        $line2 = substr($data, 76);
+        $line2 = ical_split_line($line2); //recursive
+        $data = $line1 . "\r\n " . $line2;
+        return $data;
+    }
+    else {
+        return $data;
+    }
 }
 
 // Function to parse an iCalendar content into events
@@ -69,18 +98,34 @@ function parse_ical($ical_content) {
     $lines = explode("\n", $ical_content);
     $events = [];
     $event = null;
+    $tmpline = null;
 
     foreach ($lines as $line) {
-        $line = trim($line);
+        //$line = trim($line);
+        if($tmpline) { //we have to merge the lines and use ical_split_line() to split it later
+            $line = $tmpline . $line;
+            $tmpline = null;
+        }
 
-        if ($line == "BEGIN:VEVENT") {
+        if (str_starts_with($line, "BEGIN:VEVENT")) {
             $event = [];
-        } elseif ($line == "END:VEVENT") {
+        } elseif (str_starts_with($line, "END:VEVENT")) {
             $events[] = $event;
             $event = null;
         } elseif ($event !== null) {
-            list($key, $value) = explode(":", $line, 2);
-            $event[$key] = $value;
+            if(str_starts_with($line, " ")) { //base ics breaks line after 75 chars, next line starts with a space
+                $event[$key] .= "\r\n " . trim($line); //add line to previous key
+            } else {
+                if(str_contains($line, ":")) { //it is possible that the ":" is in the next line (long key)
+                    list($key, $value) = explode(":", $line, 2);
+                    $key = ical_split_line($key);
+                    $value = ical_split_line($value);
+                    $event[$key] = trim($value);
+                }
+                else {
+                    $tmpline = trim($line);
+                }
+            }
         }
     }
 
@@ -106,8 +151,11 @@ function merge_calendars($calendar_urls) {
 function generate_ical($events, $calendar_name = null, $calendar_colour = null) {
     $output = "BEGIN:VCALENDAR\r\n";
     $output .= "VERSION:2.0\r\n";
+    $output .= "CALSCALE:GREGORIAN\r\n";
     $output .= "PRODID:-//Your Company//Your Product//EN\r\n";
-    
+    $output .= "REFRESH-INTERVAL;VALUE=DURATION:PT4H\r\n";
+    $output .= "X-PUBLISHED-TTL:PT4H\r\n";
+
     // Add calendar name (optional)
     if ($calendar_name) {
         $output .= "X-WR-CALNAME:$calendar_name\r\n";
@@ -127,7 +175,7 @@ function generate_ical($events, $calendar_name = null, $calendar_colour = null) 
     }
 
     $output .= "END:VCALENDAR\r\n";
-    
+
     return $output;
 }
 
@@ -138,9 +186,9 @@ $merged_events = merge_calendars($calendar_urls);
 // Generate the iCalendar output with name and colour
 $ical_content = generate_ical($merged_events, $calendar_name, $calendar_colour);
 
-// Output the iCalendar file as a download
-header('Content-Type: text/calendar; charset=utf-8');
-header('Content-Disposition: inline; filename="merged_calendar.ics"');
+if($cachefile) {
+  file_put_contents($cachefile, $ical_content);
+}
 
 echo $ical_content;
 

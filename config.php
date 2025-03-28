@@ -15,4 +15,6 @@ $calendar_name = 'My Merged Calendar';
 // Optional: Set the colour of the calendar (Hex colour in RGB, e.g. #FF0000 for Red)
 $calendar_colour = '#FF0000'; // Red
 
+// Optional: cache the merged calender to a file, we'll send this file instead of a new merge if it is not older than 30 minutes
+$cachefile = ''; //e.g. /tmp/cache.ics
 ?>
